@@ -213,7 +213,7 @@ Features:
 
 1. **Employee Survey Analysis**: Identify patterns of dissatisfaction across responses
 2. **Exit Interview Processing**: Extract reasons for departure at scale
-3. **Forum Monitoring**: Track sentiment on workforce forums (e.g., TheLayoff, Blind)
+3. **Forum Monitoring**: Track sentiment on workforce forums (e.g., TheLayoffradar.com, Blind)
 4. **Customer Feedback**: Analyze product reviews and support tickets
 5. **Social Media Monitoring**: Track brand sentiment and complaints
 
