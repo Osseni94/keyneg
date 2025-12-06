@@ -1,0 +1,15 @@
+# KeyNeg Requirements
+# Author: Kaossara Osseni
+# Email: admin@grandnasser.com
+
+# Core dependencies
+sentence-transformers>=2.2.0
+scikit-learn>=1.0.0
+numpy>=1.21.0
+
+# Streamlit app (optional)
+streamlit>=1.20.0
+pandas>=1.3.0
+
+# Zero-shot classification (optional)
+# transformers>=4.20.0
