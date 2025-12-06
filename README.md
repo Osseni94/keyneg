@@ -1,9 +1,23 @@
-# KeyNeg
+<p align="center">
+  <img src="assets/Keyneg_logo.png" alt="KeyNeg Logo" width="300">
+</p>
 
-**A KeyBERT-style Negative Sentiment and Keyword Extractor for Workforce Intelligence**
+<h1 align="center">KeyNeg</h1>
 
-Author: Kaossara Osseni
-Email: admin@grandnasser.com
+<p align="center">
+  <strong>A KeyBERT-style Negative Sentiment and Keyword Extractor for Workforce Intelligence</strong>
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/keyneg/"><img src="https://img.shields.io/pypi/v/keyneg.svg" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/keyneg/"><img src="https://img.shields.io/pypi/pyversions/keyneg.svg" alt="Python versions"></a>
+  <a href="https://github.com/Osseni94/keyneg/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+</p>
+
+---
+
+**Author:** Kaossara Osseni
+**Email:** admin@grandnasser.com
 
 KeyNeg extracts negative keywords, frustration indicators, and discontent signals from text. Designed for analyzing employee feedback, forum discussions, customer reviews, and more.
 
