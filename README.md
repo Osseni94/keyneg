@@ -11,6 +11,7 @@
 <p align="center">
   <a href="https://pypi.org/project/keyneg/"><img src="https://img.shields.io/pypi/v/keyneg.svg" alt="PyPI version"></a>
   <a href="https://pypi.org/project/keyneg/"><img src="https://img.shields.io/pypi/pyversions/keyneg.svg" alt="Python versions"></a>
+  <a href="https://pepy.tech/project/keyneg"><img src="https://static.pepy.tech/badge/keyneg" alt="Downloads"></a>
   <a href="https://github.com/Osseni94/keyneg/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
 </p>
 
