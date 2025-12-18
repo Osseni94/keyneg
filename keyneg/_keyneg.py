@@ -624,6 +624,101 @@ class KeyNeg:
 
         return list(categories)
 
+    def summarize_by_label(
+        self,
+        docs: List[str],
+        top_n: int = 3,
+        examples_per_label: int = 3,
+        threshold: float = 0.3,
+        show_progress: bool = True,
+    ) -> Dict:
+        """
+        Analyze multiple documents and group them by sentiment label.
+
+        Takes a batch of texts, analyzes each for sentiment, and returns
+        a summary grouped by label with example quotes for each complaint type.
+        Perfect for generating reports from customer feedback or reviews.
+
+        Args:
+            docs: List of documents to analyze and group.
+            top_n: Number of sentiment labels to consider per document (default: 3).
+            examples_per_label: Max example quotes per label (default: 3).
+            threshold: Minimum similarity threshold (default: 0.3).
+            show_progress: Show progress bar during embedding (default: True).
+
+        Returns:
+            Dictionary with:
+            - total_docs: Number of documents processed
+            - unique_labels: Number of unique labels found
+            - summary: Dict mapping label -> {count, avg_score, examples}
+
+        Example:
+            >>> kn = KeyNeg()
+            >>> result = kn.summarize_by_label([
+            ...     "The service was terrible",
+            ...     "Staff was rude and unhelpful",
+            ...     "Billing department never responds",
+            ... ])
+            >>> print(result['summary']['poor customer service'])
+            {'count': 2, 'avg_score': 0.65, 'examples': [...]}
+        """
+        if not docs:
+            return {
+                "total_docs": 0,
+                "unique_labels": 0,
+                "summary": {},
+            }
+
+        # Get sentiments for all docs
+        sentiments_batch = self.extract_sentiments_batch(
+            docs,
+            top_n=top_n,
+            threshold=threshold,
+            show_progress=show_progress,
+        )
+
+        # Group by label
+        label_groups: Dict[str, Dict] = {}
+
+        for doc, sentiments in zip(docs, sentiments_batch):
+            if not sentiments:
+                continue
+
+            for label, score in sentiments:
+                if label not in label_groups:
+                    label_groups[label] = {
+                        "count": 0,
+                        "total_score": 0.0,
+                        "examples": [],
+                    }
+
+                label_groups[label]["count"] += 1
+                label_groups[label]["total_score"] += score
+
+                # Store example with score
+                if len(label_groups[label]["examples"]) < examples_per_label:
+                    truncated = doc[:150] + "..." if len(doc) > 150 else doc
+                    label_groups[label]["examples"].append({
+                        "text": truncated,
+                        "score": round(score, 4),
+                    })
+
+        # Format output - sort by count descending
+        summary = {}
+        for label, data in sorted(label_groups.items(), key=lambda x: -x[1]["count"]):
+            avg_score = data["total_score"] / data["count"] if data["count"] > 0 else 0
+            summary[label] = {
+                "count": data["count"],
+                "avg_score": round(avg_score, 4),
+                "examples": data["examples"],
+            }
+
+        return {
+            "total_docs": len(docs),
+            "unique_labels": len(summary),
+            "summary": summary,
+        }
+
     def add_custom_labels(self, labels: List[str]):
         """Add custom sentiment labels."""
         self.labels.extend(labels)

@@ -14,7 +14,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="keyneg",
-    version="1.0.0",
+    version="1.1.0",
     author="Kaossara Osseni",
     author_email="admin@grandnasser.com",
     description="A KeyBERT-style negative sentiment and keyword extractor for workforce intelligence",

@@ -31,6 +31,12 @@ For batch processing:
     >>> docs = ["Comment 1...", "Comment 2...", "Comment 3..."]
     >>> results = kn.analyze_batch(docs)
 
+Summarize by label (group texts by complaint type):
+    >>> docs = ["Service was terrible", "Staff rude", "Billing never responds"]
+    >>> summary = kn.summarize_by_label(docs)
+    >>> print(summary['summary']['poor customer service'])
+    {'count': 2, 'avg_score': 0.65, 'examples': [...]}
+
 Special detectors:
     >>> kn.detect_departure_intent("I'm updating my resume and interviewing")
     {'detected': True, 'confidence': 0.67, 'signals': ['updating resume', 'interviewing']}
@@ -42,7 +48,7 @@ Author: Kaossara Osseni
 Email: admin@grandnasser.com
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Kaossara Osseni"
 __email__ = "admin@grandnasser.com"
 
