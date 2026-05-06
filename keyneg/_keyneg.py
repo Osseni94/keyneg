@@ -8,14 +8,18 @@ Author: Kaossara Osseni
 Email: admin@grandnasser.com
 """
 
+import logging
+from copy import deepcopy
 from typing import List, Dict, Tuple, Union, Optional
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import CountVectorizer
-import warnings
 
 from .taxonomy import SENTIMENT_LABELS, NEGATIVE_TAXONOMY, get_all_keywords
+from .negation import find_unnegated_matches
+
+logger = logging.getLogger(__name__)
 
 
 class KeyNeg:
@@ -37,6 +41,7 @@ class KeyNeg:
         model: Union[str, SentenceTransformer] = "all-mpnet-base-v2",
         custom_labels: Optional[List[str]] = None,
         custom_taxonomy: Optional[Dict] = None,
+        extra_negation_tokens: Optional[List[str]] = None,
     ):
         """
         Initialize KeyNeg.
@@ -48,6 +53,9 @@ class KeyNeg:
                           instead of or in addition to defaults.
             custom_taxonomy: Optional custom taxonomy dictionary to merge with
                             or replace the default taxonomy.
+            extra_negation_tokens: Domain-specific negators added on top of
+                          the built-in set. Useful for legal/regulatory
+                          idioms (e.g., ['notwithstanding']).
         """
         # Load or use provided model
         if isinstance(model, str):
@@ -60,15 +68,22 @@ class KeyNeg:
         # Setup labels
         self.labels = custom_labels if custom_labels else SENTIMENT_LABELS.copy()
 
-        # Setup taxonomy
-        self.taxonomy = NEGATIVE_TAXONOMY.copy()
+        # Setup taxonomy (deepcopy so per-instance mutations don't leak into
+        # the module-level NEGATIVE_TAXONOMY dict shared across instances).
+        self.taxonomy = deepcopy(NEGATIVE_TAXONOMY)
         if custom_taxonomy:
             self._merge_taxonomy(custom_taxonomy)
+
+        # Domain-specific negation cues forwarded to find_unnegated_matches.
+        self._extra_negation_tokens: Optional[List[str]] = (
+            list(extra_negation_tokens) if extra_negation_tokens else None
+        )
 
         # Pre-compute label embeddings
         self._label_embeddings = None
         self._keyword_embeddings = None
         self._all_keywords = None
+        self._all_keywords_lower = None
 
     def _merge_taxonomy(self, custom: Dict):
         """Merge custom taxonomy with default."""
@@ -89,10 +104,40 @@ class KeyNeg:
 
     @property
     def all_keywords(self) -> List[str]:
-        """Get all keywords from taxonomy."""
+        """Flat list of unique keywords from this instance's taxonomy.
+
+        Reads from ``self.taxonomy`` (not the module-level constant) so that
+        ``add_custom_keywords`` actually surfaces in extraction. Pre-1.2 this
+        called the module-level ``get_all_keywords()``, which silently
+        ignored per-instance customizations.
+        """
         if self._all_keywords is None:
-            self._all_keywords = get_all_keywords()
+            keywords: List[str] = []
+
+            def _walk(node):
+                if isinstance(node, list):
+                    keywords.extend(k for k in node if isinstance(k, str))
+                elif isinstance(node, dict):
+                    for value in node.values():
+                        _walk(value)
+
+            _walk(self.taxonomy)
+            # Dedupe while preserving order so MMR / batching are stable.
+            seen = set()
+            unique: List[str] = []
+            for kw in keywords:
+                if kw not in seen:
+                    seen.add(kw)
+                    unique.append(kw)
+            self._all_keywords = unique
         return self._all_keywords
+
+    @property
+    def all_keywords_lower(self) -> set:
+        """Lowercased set of taxonomy keywords for O(1) membership tests."""
+        if self._all_keywords_lower is None:
+            self._all_keywords_lower = {k.lower() for k in self.all_keywords}
+        return self._all_keywords_lower
 
     @property
     def keyword_embeddings(self) -> np.ndarray:
@@ -217,12 +262,14 @@ class KeyNeg:
                     [doc_embedding], candidate_embeddings
                 )[0]
                 for candidate, score in zip(doc_candidates, similarities):
-                    # Boost candidates that appear in taxonomy
-                    boost = 1.2 if candidate.lower() in [k.lower() for k in self.all_keywords] else 1.0
-                    if score * boost >= threshold:
-                        all_candidates.append((candidate, float(score * boost)))
-        except Exception:
-            pass  # Fall back to taxonomy-only if extraction fails
+                    # Boost candidates that appear in taxonomy, but cap the
+                    # boosted score at 1.0 so it remains a valid cosine sim.
+                    boost = 1.2 if candidate.lower() in self.all_keywords_lower else 1.0
+                    boosted = min(float(score) * boost, 1.0)
+                    if boosted >= threshold:
+                        all_candidates.append((candidate, boosted))
+        except Exception as exc:
+            logger.warning("n-gram extraction failed, falling back to taxonomy-only: %s", exc)
 
         # Deduplicate and sort
         seen = set()
@@ -355,11 +402,11 @@ class KeyNeg:
         top_n_sentiments: int = 5,
         keyword_threshold: float = 0.25,
         sentiment_threshold: float = 0.3,
+        polarity_filter: bool = False,
+        polarity_threshold: float = 0.0,
     ) -> Dict:
         """
         Comprehensive analysis of a document.
-
-        Extracts both keywords and sentiments in a single call.
 
         Args:
             doc: Input text.
@@ -367,43 +414,106 @@ class KeyNeg:
             top_n_sentiments: Number of sentiments to extract.
             keyword_threshold: Threshold for keywords.
             sentiment_threshold: Threshold for sentiments.
+            polarity_filter: If True, run a real polarity classifier first
+                and restrict keyword/sentiment extraction to sentences whose
+                polarity is below ``polarity_threshold``. Requires the
+                ``polarity`` extra: ``pip install keyneg[polarity]``.
+            polarity_threshold: Sentences with ``polarity_score < threshold``
+                are kept. Default 0.0 keeps any net-negative sentence; raise
+                it (e.g. -0.3) to keep only strongly negative sentences.
 
         Returns:
-            Dictionary with 'keywords', 'sentiments', 'top_sentiment',
-            'negativity_score', and 'categories'.
+            Dictionary with:
+
+            - ``keywords`` / ``sentiments`` / ``top_sentiment`` / ``categories``
+            - ``topic_match_score``: mean cosine similarity to detected
+              negative labels in [0, 1]. Measures *topical overlap* with
+              negative themes — not polarity.
+            - ``negativity_score``: alias for ``topic_match_score`` retained
+              for backward compatibility.
+            - ``polarity_score``: signed polarity in [-1, 1] (negative =
+              negative tone). Populated only when ``polarity_filter=True``;
+              defaults to 0.0 otherwise.
+            - ``polarity_filter_applied``: True if filtering ran.
+            - ``negative_sentences``: list of sentences kept by the polarity
+              filter (empty unless ``polarity_filter=True``).
 
         Example:
             >>> result = kn.analyze("I hate the toxic culture here")
             >>> print(result['top_sentiment'])
             'toxic culture'
+            >>> print(result['topic_match_score'])
+            0.65
         """
+        empty_result = {
+            "keywords": [],
+            "sentiments": [],
+            "top_sentiment": None,
+            "topic_match_score": 0.0,
+            "negativity_score": 0.0,
+            "polarity_score": 0.0,
+            "polarity_filter_applied": False,
+            "negative_sentences": [],
+            "categories": [],
+        }
+
         if not doc or not doc.strip():
-            return {
-                "keywords": [],
-                "sentiments": [],
-                "top_sentiment": None,
-                "negativity_score": 0.0,
-                "categories": [],
-            }
+            return empty_result
+
+        analysis_doc = doc
+        polarity_score = 0.0
+        negative_sentences: List[str] = []
+        polarity_applied = False
+
+        if polarity_filter:
+            # Lazy import: the polarity classifier requires the optional
+            # ``polarity`` extra (onnxruntime, transformers). We import here
+            # so users who never call ``polarity_filter=True`` don't pay the
+            # import cost — and so a missing extra fails with a clear message
+            # only when actually requested.
+            from .polarity import get_polarity_classifier
+            classifier = get_polarity_classifier()
+            sentences = classifier.split_sentences(doc)
+            if sentences:
+                sentence_scores = classifier.polarity_scores(sentences)
+                negative_sentences = [
+                    s for s, score in zip(sentences, sentence_scores)
+                    if score < polarity_threshold
+                ]
+                polarity_score = float(np.mean(sentence_scores))
+                polarity_applied = True
+
+                if not negative_sentences:
+                    # Document scanned, nothing was negative-leaning.
+                    return {
+                        **empty_result,
+                        "polarity_score": polarity_score,
+                        "polarity_filter_applied": True,
+                    }
+                analysis_doc = " ".join(negative_sentences)
 
         keywords = self.extract_keywords(
-            doc, top_n=top_n_keywords, threshold=keyword_threshold
+            analysis_doc, top_n=top_n_keywords, threshold=keyword_threshold
         )
         sentiments = self.extract_sentiments(
-            doc, top_n=top_n_sentiments, threshold=sentiment_threshold
+            analysis_doc, top_n=top_n_sentiments, threshold=sentiment_threshold
         )
 
-        # Calculate overall negativity score
-        negativity_score = np.mean([s[1] for s in sentiments]) if sentiments else 0.0
-
-        # Identify categories
+        topic_match = float(np.mean([s[1] for s in sentiments])) if sentiments else 0.0
         categories = self._identify_categories(keywords)
 
         return {
             "keywords": keywords,
             "sentiments": sentiments,
             "top_sentiment": sentiments[0][0] if sentiments else None,
-            "negativity_score": float(negativity_score),
+            "topic_match_score": topic_match,
+            # Alias kept for backward compatibility with v1.1.x callers.
+            # New code should read ``topic_match_score`` (and ``polarity_score``
+            # when ``polarity_filter=True``).
+            "negativity_score": topic_match,
+            "polarity_score": polarity_score,
+            "polarity_filter_applied": polarity_applied,
+            "negative_sentences": negative_sentences,
             "categories": categories,
         }
 
@@ -413,19 +523,36 @@ class KeyNeg:
         top_n_keywords: int = 10,
         top_n_sentiments: int = 5,
         show_progress: bool = True,
+        polarity_filter: bool = False,
+        polarity_threshold: float = 0.0,
     ) -> List[Dict]:
         """
         Batch analysis of multiple documents.
 
         Args:
             docs: List of documents.
-            top_n_keywords: Keywords per document.
-            top_n_sentiments: Sentiments per document.
-            show_progress: Show progress bar.
+            top_n_keywords / top_n_sentiments / show_progress: as for the
+                non-batch methods.
+            polarity_filter / polarity_threshold: see ``analyze``.
 
         Returns:
-            List of analysis dictionaries.
+            List of analysis dictionaries. See ``analyze`` for shape.
         """
+        if polarity_filter:
+            # Per-doc routing; the polarity classifier is called once per
+            # doc internally so we don't lose batch parallelism for the
+            # post-filter taxonomy step.
+            return [
+                self.analyze(
+                    doc,
+                    top_n_keywords=top_n_keywords,
+                    top_n_sentiments=top_n_sentiments,
+                    polarity_filter=True,
+                    polarity_threshold=polarity_threshold,
+                )
+                for doc in docs
+            ]
+
         keywords_batch = self.extract_keywords_batch(
             docs, top_n=top_n_keywords, show_progress=show_progress
         )
@@ -433,15 +560,19 @@ class KeyNeg:
             docs, top_n=top_n_sentiments, show_progress=show_progress
         )
 
-        results = []
+        results: List[Dict] = []
         for keywords, sentiments in zip(keywords_batch, sentiments_batch):
-            negativity_score = np.mean([s[1] for s in sentiments]) if sentiments else 0.0
+            topic_match = float(np.mean([s[1] for s in sentiments])) if sentiments else 0.0
             categories = self._identify_categories(keywords)
             results.append({
                 "keywords": keywords,
                 "sentiments": sentiments,
                 "top_sentiment": sentiments[0][0] if sentiments else None,
-                "negativity_score": float(negativity_score),
+                "topic_match_score": topic_match,
+                "negativity_score": topic_match,
+                "polarity_score": 0.0,
+                "polarity_filter_applied": False,
+                "negative_sentences": [],
                 "categories": categories,
             })
 
@@ -451,30 +582,31 @@ class KeyNeg:
         """
         Analyze the intensity level of negativity in text.
 
+        Negated mentions are skipped: "I'm not absolutely furious" does
+        not register the "absolutely" intensifier.
+
         Returns:
             Dictionary with 'level' (1-4), 'label', and 'indicators'.
         """
+        if not doc:
+            return {"level": 0, "label": "neutral", "indicators": []}
+
         intensity_keywords = self.taxonomy.get("emotional_states", {}).get(
             "intensity_expressions", {}
         )
 
-        doc_lower = doc.lower()
-
-        # Check each intensity level
-        levels = {
-            "mild": 1,
-            "moderate": 2,
-            "strong": 3,
-            "extreme": 4,
-        }
+        levels = {"mild": 1, "moderate": 2, "strong": 3, "extreme": 4}
 
         found_level = 0
         found_label = "neutral"
-        found_indicators = []
+        found_indicators: List[str] = []
 
         for label, level in levels.items():
             keywords = intensity_keywords.get(label, [])
-            matches = [kw for kw in keywords if kw.lower() in doc_lower]
+            matches = find_unnegated_matches(
+                doc, keywords,
+                extra_negation_tokens=self._extra_negation_tokens,
+            )
             if matches and level > found_level:
                 found_level = level
                 found_label = label
@@ -490,17 +622,22 @@ class KeyNeg:
         """
         Detect signals of intent to leave/quit.
 
+        Negated mentions are skipped: "I'm not quitting" returns no signals.
+
         Returns:
             Dictionary with 'detected', 'confidence', and 'signals'.
         """
+        if not doc:
+            return {"detected": False, "confidence": 0.0, "signals": []}
+
         departure_keywords = self.taxonomy.get("action_indicators", {}).get(
             "departure_intent", []
         )
-
-        doc_lower = doc.lower()
-        matches = [kw for kw in departure_keywords if kw.lower() in doc_lower]
-
-        confidence = min(len(matches) / 3.0, 1.0)  # Cap at 1.0
+        matches = find_unnegated_matches(
+            doc, departure_keywords,
+            extra_negation_tokens=self._extra_negation_tokens,
+        )
+        confidence = min(len(matches) / 3.0, 1.0)
 
         return {
             "detected": len(matches) > 0,
@@ -512,15 +649,22 @@ class KeyNeg:
         """
         Detect signals of escalation (legal threats, going public, etc.).
 
+        Negated mentions are skipped: "I'm not contacting any lawyer"
+        returns no signals.
+
         Returns:
             Dictionary with 'detected', 'risk_level', and 'signals'.
         """
+        if not doc:
+            return {"detected": False, "risk_level": "low", "signals": []}
+
         escalation_keywords = self.taxonomy.get("action_indicators", {}).get(
             "escalation_threats", []
         )
-
-        doc_lower = doc.lower()
-        matches = [kw for kw in escalation_keywords if kw.lower() in doc_lower]
+        matches = find_unnegated_matches(
+            doc, escalation_keywords,
+            extra_negation_tokens=self._extra_negation_tokens,
+        )
 
         if len(matches) >= 3:
             risk_level = "high"
@@ -547,7 +691,9 @@ class KeyNeg:
             )
             vectorizer.fit([doc])
             return list(vectorizer.get_feature_names_out())
-        except Exception:
+        except ValueError as exc:
+            # CountVectorizer raises ValueError for empty/stop-word-only docs.
+            logger.debug("CountVectorizer found no candidates for doc: %s", exc)
             return []
 
     def _mmr_diversify(
@@ -727,13 +873,15 @@ class KeyNeg:
     def add_custom_keywords(self, category: str, keywords: List[str]):
         """Add custom keywords to a taxonomy category."""
         if category not in self.taxonomy:
-            self.taxonomy[category] = {"custom": keywords}
+            self.taxonomy[category] = {"custom": list(keywords)}
         elif isinstance(self.taxonomy[category], dict):
             if "custom" in self.taxonomy[category]:
                 self.taxonomy[category]["custom"].extend(keywords)
             else:
-                self.taxonomy[category]["custom"] = keywords
-        self._all_keywords = None  # Reset cache
+                self.taxonomy[category]["custom"] = list(keywords)
+        # Reset all keyword-derived caches.
+        self._all_keywords = None
+        self._all_keywords_lower = None
         self._keyword_embeddings = None
 
     def __repr__(self):

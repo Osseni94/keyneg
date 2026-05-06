@@ -48,7 +48,7 @@ Author: Kaossara Osseni
 Email: admin@grandnasser.com
 """
 
-__version__ = "1.1.0"
+__version__ = "1.3.0"
 __author__ = "Kaossara Osseni"
 __email__ = "admin@grandnasser.com"
 
@@ -60,6 +60,26 @@ from keyneg.taxonomy import (
     get_keywords_by_category,
     get_category_labels,
 )
+from keyneg.negation import (
+    find_unnegated_matches,
+    is_negated,
+    NEGATION_TOKENS,
+)
+
+# PolarityClassifier requires the optional ``polarity`` extra. We import
+# lazily-via-shim so ``import keyneg`` itself never fails for users who
+# don't have onnxruntime/transformers installed; calling the class without
+# the extras raises a clear PolarityError.
+try:
+    from keyneg.polarity import (
+        PolarityClassifier,
+        PolarityError,
+        get_polarity_classifier,
+    )
+except Exception:  # pragma: no cover - only fires on truly broken installs
+    PolarityClassifier = None  # type: ignore[assignment]
+    PolarityError = None  # type: ignore[assignment]
+    get_polarity_classifier = None  # type: ignore[assignment]
 
 __all__ = [
     "KeyNeg",
@@ -68,4 +88,10 @@ __all__ = [
     "get_all_keywords",
     "get_keywords_by_category",
     "get_category_labels",
+    "find_unnegated_matches",
+    "is_negated",
+    "NEGATION_TOKENS",
+    "PolarityClassifier",
+    "PolarityError",
+    "get_polarity_classifier",
 ]

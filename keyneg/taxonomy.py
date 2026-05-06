@@ -6,7 +6,7 @@ from text data for workforce intelligence and marketing analysis.
 
 Author: Kaossara Osseni
 Email: admin@grandnasser.com
-Version: 2.1.0
+Version: 1.3.0
 """
 
 # =============================================================================

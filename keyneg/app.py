@@ -3,20 +3,20 @@ KeyNeg Streamlit Application
 ============================
 Interactive UI for negative sentiment and keyword extraction.
 
+Run via the installed entry point::
+
+    keyneg-app
+
+Or directly with streamlit::
+
+    streamlit run -m keyneg.app
+
 Author: Kaossara Osseni
 Email: admin@grandnasser.com
-
-Run with:
-    streamlit run keyneg_app.py
 """
 
 import streamlit as st
 import pandas as pd
-import sys
-from pathlib import Path
-
-# Add parent directory to path for local imports
-sys.path.insert(0, str(Path(__file__).parent))
 
 from keyneg import KeyNeg, get_category_labels
 from keyneg.utils import (
@@ -155,7 +155,6 @@ def main():
 
         if analyze_btn and text_input.strip():
             with st.spinner("Analyzing..."):
-                # Full analysis
                 result = kn.analyze(
                     text_input,
                     top_n_keywords=top_n_keywords,
@@ -164,15 +163,12 @@ def main():
                     sentiment_threshold=sentiment_threshold,
                 )
 
-                # Special detections
                 intensity = kn.get_intensity(text_input)
                 departure = kn.detect_departure_intent(text_input)
                 escalation = kn.detect_escalation_risk(text_input)
 
-            # Results layout
             st.markdown("---")
 
-            # Top metrics
             metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
 
             with metrics_col1:
@@ -185,7 +181,9 @@ def main():
                 st.metric(
                     "Negativity Score",
                     f"{result['negativity_score']:.2f}",
-                    help="Average similarity across detected sentiments (0-1)",
+                    help="Average cosine similarity across detected sentiment labels (0-1). "
+                         "Measures topical overlap with negative themes, not polarity. "
+                         "Install keyneg[polarity] for true polarity classification.",
                 )
 
             with metrics_col3:
@@ -200,7 +198,6 @@ def main():
 
             st.markdown("---")
 
-            # Alert boxes for special detections
             alert_col1, alert_col2 = st.columns(2)
 
             with alert_col1:
@@ -225,7 +222,6 @@ def main():
 
             st.markdown("---")
 
-            # Detailed results
             results_col1, results_col2 = st.columns(2)
 
             with results_col1:
@@ -243,7 +239,6 @@ def main():
                     )
                     st.dataframe(sentiment_df, use_container_width=True, hide_index=True)
 
-                    # Bar chart
                     chart_data = pd.DataFrame(
                         {"Sentiment": [s for s, _ in result["sentiments"]],
                          "Score": [score for _, score in result["sentiments"]]}
@@ -269,12 +264,10 @@ def main():
                 else:
                     st.info("No keywords detected above threshold.")
 
-            # Categories
             if result["categories"]:
                 st.markdown("### Detected Categories")
                 st.write(", ".join(result["categories"]))
 
-            # Highlighted text
             st.markdown("### Highlighted Text")
             highlighted = highlight_keywords(
                 text_input,
@@ -338,12 +331,10 @@ def main():
                         show_progress=True,
                     )
 
-                    # Aggregate statistics
                     summary = aggregate_batch_results(results)
 
                 st.success("Analysis complete!")
 
-                # Summary metrics
                 st.markdown("### Summary Statistics")
                 sum_col1, sum_col2, sum_col3, sum_col4 = st.columns(4)
 
@@ -358,7 +349,6 @@ def main():
 
                 st.markdown("---")
 
-                # Top sentiments across all docs
                 st.markdown("### Most Common Sentiments (Across All Texts)")
                 if summary["top_sentiments"]:
                     top_sent_df = pd.DataFrame(summary["top_sentiments"][:10])
@@ -366,14 +356,12 @@ def main():
                     top_sent_df["Avg Score"] = top_sent_df["Avg Score"].apply(lambda x: f"{x:.3f}")
                     st.dataframe(top_sent_df, use_container_width=True, hide_index=True)
 
-                # Category distribution
                 st.markdown("### Category Distribution")
                 if summary["category_distribution"]:
                     cat_df = pd.DataFrame(summary["category_distribution"])
                     cat_df.columns = ["Category", "Count"]
                     st.bar_chart(cat_df.set_index("Category"))
 
-                # Detailed results table
                 st.markdown("### Detailed Results")
                 detail_data = []
                 for i, (text, result) in enumerate(zip(texts_to_analyze, results)):
@@ -389,7 +377,6 @@ def main():
                 detail_df = pd.DataFrame(detail_data)
                 st.dataframe(detail_df, use_container_width=True, hide_index=True)
 
-                # Download results
                 st.markdown("### Download Results")
                 csv_data = detail_df.to_csv(index=False)
                 st.download_button(
@@ -430,7 +417,15 @@ def main():
                pre-defined sentiment labels and a comprehensive keyword taxonomy.
 
             3. **Scoring**: Results are ranked by cosine similarity and filtered
-               by threshold.
+               by threshold. The reported score is a *topic-match* score: how
+               closely the text overlaps with negative themes. For true polarity
+               (negative vs positive), install the `polarity` extra:
+
+               ```bash
+               pip install keyneg[polarity]
+               ```
+
+               and pass `polarity_filter=True` to `analyze()`.
 
             ### Taxonomy Categories
             """
@@ -447,33 +442,20 @@ def main():
             ```python
             from keyneg import KeyNeg
 
-            # Initialize
             kn = KeyNeg()
 
-            # Extract sentiments
             sentiments = kn.extract_sentiments("I'm frustrated with the micromanagement")
-
-            # Extract keywords
             keywords = kn.extract_keywords("The toxic culture is unbearable")
 
-            # Full analysis
             result = kn.analyze("My manager never listens")
             print(result['top_sentiment'])
             print(result['negativity_score'])
 
-            # Batch processing
             results = kn.analyze_batch(["Text 1", "Text 2", "Text 3"])
 
-            # Special detectors
             departure = kn.detect_departure_intent("I'm updating my resume")
             escalation = kn.detect_escalation_risk("I'm contacting my lawyer")
             ```
-
-            ### API Integration
-
-            KeyNeg can be easily wrapped in a FastAPI or Flask endpoint for
-            production use. The batch methods are optimized for processing
-            large volumes of text efficiently.
             """
         )
 
