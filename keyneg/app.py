@@ -21,7 +21,6 @@ import pandas as pd
 from keyneg import KeyNeg, get_category_labels
 from keyneg.utils import (
     highlight_keywords,
-    format_results_table,
     score_to_severity,
     aggregate_batch_results,
 )
@@ -118,14 +117,10 @@ def main():
         help="Minimum similarity score for keywords.",
     )
 
-    diversity = st.sidebar.slider(
-        "Result Diversity (MMR)",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.0,
-        step=0.1,
-        help="Higher values = more diverse results (less redundancy).",
-    )
+    # The diversity (MMR) slider was removed in 1.2 when this view migrated
+    # from per-method extraction to a single ``kn.analyze(...)`` call, which
+    # doesn't expose a ``diversity`` parameter. Re-add via separate
+    # ``extract_*`` calls if you need MMR re-ranking in the UI.
 
     # Tabs for different modes
     tab1, tab2, tab3 = st.tabs(["Single Text", "Batch Analysis", "About"])

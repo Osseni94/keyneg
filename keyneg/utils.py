@@ -61,12 +61,12 @@ def highlight_keywords(
             color = f"rgb(255, {intensity}, {intensity})"
             replacement = f'<span style="background-color: {color}; padding: 2px 4px; border-radius: 3px;" title="Score: {score:.2f}">\\g<0></span>'
         elif format == "markdown":
-            replacement = f"**\\g<0>**"
+            replacement = "**\\g<0>**"
         elif format == "terminal":
             # ANSI color codes
-            replacement = f"\033[91m\\g<0>\033[0m"
+            replacement = "\033[91m\\g<0>\033[0m"
         else:  # plain
-            replacement = f"[\\g<0>]"
+            replacement = "[\\g<0>]"
 
         result = pattern.sub(replacement, result)
 

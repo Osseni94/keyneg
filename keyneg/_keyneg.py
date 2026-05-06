@@ -16,7 +16,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import CountVectorizer
 
-from .taxonomy import SENTIMENT_LABELS, NEGATIVE_TAXONOMY, get_all_keywords
+from .taxonomy import SENTIMENT_LABELS, NEGATIVE_TAXONOMY
 from .negation import find_unnegated_matches
 
 logger = logging.getLogger(__name__)
